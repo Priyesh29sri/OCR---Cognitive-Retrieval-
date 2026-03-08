@@ -221,6 +221,7 @@ async def upload_document(
         detected_elements = []
         
         # Process each page
+        yolo_descriptions = []
         for page in pages:
             elements = vision_service.detect_layouts(page)
             detected_elements.extend(elements)
@@ -229,6 +230,16 @@ async def upload_document(
             for el in elements:
                 if el.extracted_text:
                     full_document_text += el.extracted_text + " "
+                    # Collect YOLO object descriptions separately
+                    if el.element_type == "figure" and el.extracted_text.startswith("Detected "):
+                        yolo_descriptions.append(el.extracted_text)
+
+        # For images with minimal OCR text, prepend a visual summary from YOLO
+        if yolo_descriptions and file.content_type.startswith("image/"):
+            visual_summary = "This image contains the following detected objects: " + ", ".join(
+                set(d.replace("Detected ", "").split(":")[0] for d in yolo_descriptions)
+            ) + ". " + " ".join(yolo_descriptions)
+            full_document_text = visual_summary + " " + full_document_text
         
         # Update document record with processing results
         doc_record.total_pages = len(pages)
@@ -244,12 +255,19 @@ async def upload_document(
             try:
                 # Use first 3000 chars for summary
                 preview_text = full_document_text[:3000]
+                # For images, give a visual-oriented prompt
+                is_image = file.content_type.startswith("image/")
+                prompt = (
+                    f"Describe what is shown in this image based on these detected elements and any text:\n\n{preview_text}"
+                    if is_image else
+                    f"Summarize this document in 3-4 sentences:\n\n{preview_text}"
+                )
                 if together_client:
                     response = together_client.chat.completions.create(
                         model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
                         messages=[
-                            {"role": "system", "content": "You are a helpful assistant that creates concise document summaries."},
-                            {"role": "user", "content": f"Summarize this document in 3-4 sentences:\n\n{preview_text}"}
+                            {"role": "system", "content": "You are a helpful assistant."},
+                            {"role": "user", "content": prompt}
                         ],
                         max_tokens=200,
                         temperature=0.3
@@ -352,9 +370,10 @@ async def query_documents(
         # Check if we got any context — if not, still try to answer or explain
         if not retrieval_result.get("context") or not retrieval_result.get("context").strip():
             return AnswerResponse(
+                query=request.query,
                 answer="I could not find relevant content in the uploaded document for this query. This may happen if: (1) the document is still being indexed in the background — please wait 10-15 seconds and try again, or (2) the document doesn't contain information related to your question.",
-                confidence=0.0,
-                sources=[],
+                context="",
+                method="no_context_fallback",
                 metadata={"warning": "No context found", "query": request.query}
             )
         

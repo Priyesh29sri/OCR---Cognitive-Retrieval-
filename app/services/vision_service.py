@@ -69,12 +69,14 @@ class VisionService:
                     element_type = "table"
 
                 # For figures and tables, try to extract any text within them
-                extracted_text = None
                 cropped_img = image.crop((x1, y1, x2, y2))
                 cropped_array = np.array(cropped_img)
                 ocr_results = self.ocr_reader.readtext(cropped_array, detail=0)
+                # Always include class name in extracted_text so images are queryable
                 if ocr_results:
-                    extracted_text = " ".join(ocr_results)
+                    extracted_text = f"Detected {class_name}: " + " ".join(ocr_results)
+                else:
+                    extracted_text = f"Detected {class_name} in image."
 
                 element = DocumentElement(
                     element_type=element_type,

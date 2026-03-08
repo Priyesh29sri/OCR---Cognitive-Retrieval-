@@ -65,11 +65,13 @@ export default function Home() {
       const fileName = response.filename;
       const summary = response.summary;
       const pages = response.pages ?? 1;
+      const elements = response.elements_detected ?? 0;
+      const isImage = file.type.startsWith('image/');
       let summaryContent: string;
       if (summary) {
-        summaryContent = '📄 **' + fileName + '**\n\n' + summary + '\n\n*Ask me anything about this document.*';
+        summaryContent = (isImage ? '🖼️' : '📄') + ' **' + fileName + '** — uploaded successfully!\n\n' + summary + '\n\n*Ask me anything about this ' + (isImage ? 'image' : 'document') + '.*';
       } else {
-        summaryContent = '\u2705 **' + fileName + '** uploaded! (' + pages + ' pages)\n\nAsk me anything about it.';
+        summaryContent = '✅ **' + fileName + '** uploaded! (' + (isImage ? elements + ' elements detected' : pages + ' pages') + ')\n\nAsk me anything about it.';
       }
 
       // Replace the uploading spinner message with the real summary
