@@ -1,0 +1,34 @@
+services:
+  # Backend API — FastAPI
+  - type: web
+    name: cognitive-retrieval-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: TOGETHER_API_KEY
+        sync: false
+      - key: HUGGING_FACE_HUB_TOKEN
+        sync: false
+    disk:
+      name: qdrant-storage
+      mountPath: /app/qdrant_data
+      sizeGB: 1
+
+  # Frontend — Next.js
+  - type: web
+    name: cognitive-retrieval-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    plan: free
+    buildArgs:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://cognitive-retrieval-backend.onrender.com
+    envVars:
+      - key: NODE_ENV
+        value: production

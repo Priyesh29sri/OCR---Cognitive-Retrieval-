@@ -1,0 +1,67 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Database & Storage
+*.db
+qdrant_data/
+*_pageindex.json
+
+# Uploaded test files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+server.log
+frontend-dev.log
+/tmp/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+frontend/tsconfig.tsbuildinfo
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# VS Code
+.vscode/
+
+# Generated docs
+BACKEND_TEST_RESULTS.md
+CLIENT_USER_GUIDE.md
+DOCUMENT_ISOLATION_FIX.md
+EVALUATION_RESULTS.md
+ICDI-X_SYSTEM_OVERVIEW.md
+MULTI_AGENT_EXPLANATION.md
+MULTI_DOCUMENT_FIX.md
+PATH_TO_F1_80.md
+SYSTEM_IMPROVEMENTS.md
+SYSTEM_STATUS_FINAL.md
+TESTING_GUIDE.md
+websocket_completion.txt
+
+# Test artifacts
+scripts/ablation_results.json
+scripts/benchmark_results.json
+test_auth.py
+test_icdi_x.py
+client.html
+complete_client.html
+websocket_test.html
+istockphoto-*.jpg
