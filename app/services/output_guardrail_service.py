@@ -4,8 +4,10 @@ Validates AI-generated output for hallucinations, safety, and quality
 """
 from typing import Tuple, Optional, Dict
 import re
+import json
 from loguru import logger
 import google.generativeai as genai
+from together import Together
 import os
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
@@ -26,6 +28,8 @@ class OutputGuardrailService:
     
     def __init__(self):
         self.model = genai.GenerativeModel('gemini-2.5-flash')
+        together_key = os.getenv("TOGETHER_API_KEY")
+        self.together_client = Together(api_key=together_key) if together_key else None
         logger.info("Output Guardrail Service initialized")
     
     def check_hallucination(
@@ -47,12 +51,10 @@ class OutputGuardrailService:
         """
         if not evidence or len(evidence) == 0:
             return True, "No evidence to verify against", confidence_score
-        
-        try:
-            # Combine evidence
-            evidence_text = "\n".join([str(e.get('text', e)) if isinstance(e, dict) else str(e) for e in evidence[:3]])
-            
-            prompt = f"""You are a fact-checker. Determine if the ANSWER is faithful to the EVIDENCE.
+
+        # Build prompt outside try so fallback can reuse it
+        evidence_text = "\n".join([str(e.get('text', e)) if isinstance(e, dict) else str(e) for e in evidence[:3]])
+        prompt = f"""You are a fact-checker. Determine if the ANSWER is faithful to the EVIDENCE.
 
 EVIDENCE:
 {evidence_text}
@@ -66,18 +68,32 @@ Is the answer:
 3. Contradicts evidence (yes/no)
 
 Respond ONLY with: FAITHFUL or HALLUCINATION"""
-            
+
+        # Try Gemini first
+        try:
             response = self.model.generate_content(prompt)
             result = response.text.strip().upper()
-            
             if "HALLUCINATION" in result:
                 return False, "Answer contains unsupported claims", confidence_score * 0.5
-            
             return True, None, confidence_score
-            
         except Exception as e:
             logger.error(f"Hallucination check failed: {e}")
-            return True, None, confidence_score
+
+        # Together AI fallback
+        if self.together_client:
+            try:
+                response = self.together_client.chat.completions.create(
+                    model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                result = response.choices[0].message.content.strip().upper()
+                if "HALLUCINATION" in result:
+                    return False, "Answer contains unsupported claims", confidence_score * 0.5
+                return True, None, confidence_score
+            except Exception as e2:
+                logger.error(f"Together AI hallucination check also failed: {e2}")
+
+        return True, None, confidence_score
     
     def check_content_safety(self, answer: str) -> Tuple[bool, Optional[str]]:
         """
@@ -89,29 +105,42 @@ Respond ONLY with: FAITHFUL or HALLUCINATION"""
         Returns:
             (is_safe, reason)
         """
-        try:
-            prompt = f"""Is this text safe, appropriate, and free from:
+        prompt = f"""Is this text safe, appropriate, and free from:
 - Hate speech
 - Violence
-- Self-harm content  
+- Self-harm content
 - Illegal activities
 - Adult content
 
 Text: "{answer}"
 
 Respond ONLY with: SAFE or UNSAFE"""
-            
+
+        # Try Gemini first
+        try:
             response = self.model.generate_content(prompt)
             result = response.text.strip().upper()
-            
             if "UNSAFE" in result:
                 return False, "Answer contains unsafe content"
-            
             return True, None
-            
         except Exception as e:
             logger.error(f"Safety check failed: {e}")
-            return True, None
+
+        # Together AI fallback
+        if self.together_client:
+            try:
+                response = self.together_client.chat.completions.create(
+                    model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                result = response.choices[0].message.content.strip().upper()
+                if "UNSAFE" in result:
+                    return False, "Answer contains unsafe content"
+                return True, None
+            except Exception as e2:
+                logger.error(f"Together AI safety check also failed: {e2}")
+
+        return True, None
     
     def check_quality(self, answer: str, min_length: int = 20) -> Tuple[bool, Optional[str]]:
         """

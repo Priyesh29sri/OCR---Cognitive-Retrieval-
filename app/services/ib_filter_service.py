@@ -11,10 +11,13 @@ Research basis: Information Bottleneck Theory, IB-RAG
 """
 
 import os
+import json
+import re
 from typing import List, Dict, Tuple
 import numpy as np
 from loguru import logger
 from google import genai
+from together import Together
 
 
 class InformationBottleneckService:
@@ -45,7 +48,11 @@ class InformationBottleneckService:
         # Initialize Gemini for semantic filtering
         api_key = os.getenv("GEMINI_API_KEY")
         self.client = genai.Client(api_key=api_key) if api_key else None
-        
+
+        # Together AI fallback
+        together_key = os.getenv("TOGETHER_API_KEY")
+        self.together_client = Together(api_key=together_key) if together_key else None
+
         logger.info(f"Information Bottleneck Service initialized (ratio={compression_ratio}, beta={beta})")
     
     def _estimate_relevance_scores(self, sentences: List[str], query: str) -> List[float]:
@@ -61,16 +68,13 @@ class InformationBottleneckService:
         Returns:
             List of relevance scores
         """
-        if not self.client:
+        if not self.client and not self.together_client:
             # Fallback: simple keyword matching
-            return [sum(1 for word in query.lower().split() if word in sent.lower()) 
+            return [sum(1 for word in query.lower().split() if word in sent.lower())
                     for sent in sentences]
-        
-        try:
-            # Batch scoring for efficiency
-            sentences_text = "\n".join([f"{i+1}. {sent}" for i, sent in enumerate(sentences)])
-            
-            prompt = f"""Score each sentence's relevance to answering this query.
+
+        sentences_text = "\n".join([f"{i+1}. {sent}" for i, sent in enumerate(sentences)])
+        prompt = f"""Score each sentence's relevance to answering this query.
 
 Query: {query}
 
@@ -80,19 +84,36 @@ Sentences:
 Return ONLY a JSON array of scores (0-1 for each sentence):
 [score1, score2, ...]
 """
-            
-            response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config={"response_mime_type": "application/json"}
-            )
-            
-            scores = eval(response.text)
-            return scores if len(scores) == len(sentences) else [0.5] * len(sentences)
-            
-        except Exception as e:
-            logger.warning(f"Relevance scoring failed: {e}")
-            return [0.5] * len(sentences)
+
+        # Try Gemini first
+        if self.client:
+            try:
+                response = self.client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                    config={"response_mime_type": "application/json"}
+                )
+                scores = eval(response.text)
+                return scores if len(scores) == len(sentences) else [0.5] * len(sentences)
+            except Exception as e:
+                logger.warning(f"Relevance scoring failed: {e}")
+
+        # Together AI fallback
+        if self.together_client:
+            try:
+                response = self.together_client.chat.completions.create(
+                    model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                content = response.choices[0].message.content.strip()
+                match = re.search(r'\[[\d.,\s]+\]', content)
+                if match:
+                    scores = json.loads(match.group())
+                    return scores if len(scores) == len(sentences) else [0.5] * len(sentences)
+            except Exception as e2:
+                logger.warning(f"Together AI relevance scoring also failed: {e2}")
+
+        return [0.5] * len(sentences)
     
     def _compute_redundancy_scores(self, sentences: List[str]) -> List[float]:
         """
