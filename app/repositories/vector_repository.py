@@ -10,7 +10,7 @@ class VectorRepository:
 
         if qdrant_url and qdrant_api_key:
             # Qdrant Cloud (production)
-            self.db_client = AsyncQdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+            self.db_client = AsyncQdrantClient(url=qdrant_url, api_key=qdrant_api_key, timeout=60)
         else:
             # Local file storage (development)
             self.db_client = AsyncQdrantClient(path="./qdrant_data")

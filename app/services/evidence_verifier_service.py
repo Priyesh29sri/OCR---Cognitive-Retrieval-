@@ -73,7 +73,7 @@ Respond in JSON format:
         if self.client:
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-2.0-flash",
                     contents=prompt,
                     config={"response_mime_type": "application/json"}
                 )
@@ -121,7 +121,7 @@ List missing information as JSON array: ["missing1", "missing2"]
         if self.client:
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-2.0-flash",
                     contents=prompt,
                     config={"response_mime_type": "application/json"}
                 )

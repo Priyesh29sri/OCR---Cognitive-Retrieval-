@@ -60,36 +60,33 @@ function InsightsPanel({
   }[insights.complexity] ?? 'text-gray-400';
 
   return (
-    <div className="mt-4 rounded-xl border border-blue-500/30 bg-blue-500/5 backdrop-blur-sm overflow-hidden">
+    <div className="flex flex-col h-full rounded-xl border border-blue-500/30 bg-blue-500/5 backdrop-blur-sm overflow-hidden">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-blue-500/20 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Brain className="w-4 h-4 text-blue-400" />
-          <span className="text-sm font-semibold text-blue-300">Proactive Insights</span>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300">
+      <div className="px-3 py-2.5 border-b border-blue-500/20 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <Brain className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+          <span className="text-xs font-semibold text-blue-300 whitespace-nowrap">Proactive Insights</span>
+          <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 truncate">
             {insights.doc_type?.replace(/_/g, ' ')}
           </span>
-          <span className={cn('text-xs font-medium', complexityColor)}>
-            {insights.complexity}
-          </span>
         </div>
-        <span className="text-xs text-muted-foreground">
-          IB selected {insights.chunks_selected_by_ib}/{insights.chunks_analyzed} chunks
+        <span className={cn('text-xs font-medium flex-shrink-0 ml-1', complexityColor)}>
+          {insights.complexity}
         </span>
       </div>
 
-      <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Scrollable body */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-4 text-sm">
+
         {/* Key Insights */}
         {insights.insights.length > 0 && (
           <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-              🔍 Key Insights
-            </p>
-            <ul className="space-y-1.5">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">🔍 Key Insights</p>
+            <ul className="space-y-2">
               {insights.insights.map((ins, i) => (
-                <li key={i} className="flex gap-2 text-sm">
-                  <span className="text-blue-400 mt-0.5 flex-shrink-0">▸</span>
-                  <span className="text-foreground/80">{ins}</span>
+                <li key={i} className="flex gap-2 leading-snug">
+                  <span className="text-blue-400 mt-0.5 flex-shrink-0 text-xs">▸</span>
+                  <span className="text-foreground/85 text-xs">{ins}</span>
                 </li>
               ))}
             </ul>
@@ -99,89 +96,92 @@ function InsightsPanel({
         {/* Suggested Questions */}
         {insights.suggested_questions.length > 0 && (
           <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-              💡 Ask me…
-            </p>
-            <div className="flex flex-wrap gap-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">💡 Ask me…</p>
+            <div className="flex flex-col gap-1.5">
               {insights.suggested_questions.map((q, i) => (
                 <button
                   key={i}
                   onClick={() => onQuestionClick(q)}
-                  className="text-xs px-3 py-1.5 rounded-full border border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 transition-colors text-left"
+                  className="text-xs px-2.5 py-1.5 rounded-lg border border-purple-500/40 bg-purple-500/10 text-purple-200 hover:bg-purple-500/25 transition-colors text-left leading-snug"
                 >
                   {q}
                 </button>
               ))}
             </div>
-
-            {/* Key entities */}
-            {insights.key_entities.length > 0 && (
-              <div className="mt-3">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                  🏷️ Entities
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {insights.key_entities.slice(0, 8).map((e, i) => (
-                    <span
-                      key={i}
-                      className="text-xs px-2 py-0.5 rounded-md bg-muted/40 text-muted-foreground border border-border/50"
-                    >
-                      {e}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
+
+        {/* Key entities */}
+        {insights.key_entities.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">🏷️ Entities</p>
+            <div className="flex flex-wrap gap-1">
+              {insights.key_entities.slice(0, 8).map((e, i) => (
+                <span key={i} className="text-xs px-2 py-0.5 rounded-md bg-muted/40 text-muted-foreground border border-border/50">
+                  {e}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Key themes */}
+        {insights.key_themes?.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">🗂️ Themes</p>
+            <div className="flex flex-wrap gap-1">
+              {insights.key_themes.map((t, i) => (
+                <span key={i} className="text-xs px-2 py-0.5 rounded-md bg-green-500/10 text-green-400 border border-green-500/20">
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* IB stats */}
+        <p className="text-xs text-muted-foreground/60">
+          IB selected {insights.chunks_selected_by_ib}/{insights.chunks_analyzed} chunks
+        </p>
       </div>
 
-      {/* Study Guide toggle */}
-      <div className="px-4 pb-3">
+      {/* Study Guide toggle — pinned at bottom */}
+      <div className="px-3 py-2.5 border-t border-blue-500/20 flex-shrink-0">
         <button
           onClick={handleLoadGuide}
           disabled={loadingGuide}
-          className="flex items-center gap-2 text-xs text-yellow-400 hover:text-yellow-300 transition-colors font-medium"
+          className="flex items-center gap-1.5 text-xs text-yellow-400 hover:text-yellow-300 transition-colors font-medium w-full"
         >
-          <BookOpen className="w-3.5 h-3.5" />
-          {loadingGuide
-            ? 'Generating study guide…'
-            : showStudyGuide
-            ? 'Hide Study Guide'
-            : '📚 Generate Bloom\'s Study Guide'}
+          <BookOpen className="w-3.5 h-3.5 flex-shrink-0" />
+          <span className="flex-1 text-left">
+            {loadingGuide ? 'Generating study guide…' : showStudyGuide ? 'Hide Study Guide' : "📚 Bloom's Study Guide"}
+          </span>
           {!loadingGuide && (showStudyGuide ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
         </button>
 
         {showStudyGuide && studyGuide && (
-          <div className="mt-3 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3">
-            <p className="text-sm font-semibold text-yellow-300 mb-2">{studyGuide.title}</p>
-            <p className="text-xs text-muted-foreground mb-3">{studyGuide.summary}</p>
-
-            {/* Bloom's questions — show first 2 levels */}
+          <div className="mt-2 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-2.5 max-h-60 overflow-y-auto">
+            <p className="text-xs font-semibold text-yellow-300 mb-1.5">{studyGuide.title}</p>
+            <p className="text-xs text-muted-foreground mb-2 leading-snug">{studyGuide.summary}</p>
             {(['remember', 'understand', 'apply'] as const).map((level) => {
               const qs = studyGuide.blooms_questions?.[level] ?? [];
               if (!qs.length) return null;
               return (
-                <div key={level} className="mb-2">
+                <div key={level} className="mb-1.5">
                   <p className="text-xs font-semibold text-yellow-400/80 capitalize mb-1">
-                    L{['remember','understand','apply','analyze','evaluate','create'].indexOf(level)+1} — {level}
+                    L{['remember','understand','apply','analyze','evaluate','create'].indexOf(level)+1} {level}
                   </p>
                   {qs.slice(0, 2).map((q, i) => (
-                    <button
-                      key={i}
-                      onClick={() => onQuestionClick(q)}
-                      className="block text-xs text-left text-foreground/70 hover:text-foreground py-0.5 transition-colors"
-                    >
+                    <button key={i} onClick={() => onQuestionClick(q)}
+                      className="block text-xs text-left text-foreground/70 hover:text-foreground py-0.5 leading-snug transition-colors">
                       · {q}
                     </button>
                   ))}
                 </div>
               );
             })}
-
-            <p className="text-xs text-muted-foreground mt-2">
-              Est. study time: {studyGuide.estimated_study_time_minutes} min ·{' '}
-              {studyGuide.key_concepts.length} key concepts
+            <p className="text-xs text-muted-foreground mt-1.5">
+              {studyGuide.estimated_study_time_minutes} min · {studyGuide.key_concepts.length} concepts
             </p>
           </div>
         )}
@@ -410,22 +410,32 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="flex-1 container mx-auto px-4 py-6">
-          <div className="max-w-4xl mx-auto flex flex-col gap-4 h-[calc(100vh-160px)]">
+        <div className="flex-1 min-h-0 container mx-auto px-4 py-4">
+          <div className="flex gap-4 h-[calc(100vh-130px)] max-w-[1400px] mx-auto">
 
-            {/* Insights Panel — shown after upload */}
-            {loadingInsights && (
-              <div className="flex items-center gap-2 px-4 py-2 rounded-lg border border-blue-500/20 bg-blue-500/5 text-xs text-blue-300 animate-pulse">
-                <Brain className="w-3.5 h-3.5" />
-                <span>Generating proactive insights via IB compression…</span>
-              </div>
-            )}
-            {insights && !loadingInsights && (
-              <InsightsPanel insights={insights} onQuestionClick={handleSuggestedQuestion} />
-            )}
+            {/* ── Left sidebar: Insights Panel ────────────────── */}
+            <div className="w-[340px] flex-shrink-0 flex flex-col min-h-0">
+              {loadingInsights && (
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-blue-500/20 bg-blue-500/5 text-xs text-blue-300 animate-pulse">
+                  <Brain className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Analysing document via IB compression…</span>
+                </div>
+              )}
+              {insights && !loadingInsights && (
+                <InsightsPanel insights={insights} onQuestionClick={handleSuggestedQuestion} />
+              )}
+              {!insights && !loadingInsights && (
+                <div className="flex flex-col items-center justify-center h-full rounded-xl border border-border/30 bg-muted/10 text-center p-6 gap-3">
+                  <Brain className="w-8 h-8 text-muted-foreground/30" />
+                  <p className="text-xs text-muted-foreground/50 leading-relaxed">
+                    Upload a document to see proactive insights, suggested questions, and a Bloom's study guide here.
+                  </p>
+                </div>
+              )}
+            </div>
 
-            {/* Main Chat */}
-            <div className="flex-1 min-h-0">
+            {/* ── Right panel: Chat ────────────────────────────── */}
+            <div className="flex-1 min-w-0 min-h-0">
               <AnimatedAIChat
                 initialMessages={messages}
                 onSendMessage={handleSendMessage}
@@ -438,6 +448,7 @@ export default function Home() {
                 className="h-full shadow-2xl backdrop-blur-md bg-background/90"
               />
             </div>
+
           </div>
         </div>
       </div>

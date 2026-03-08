@@ -27,7 +27,7 @@ class OutputGuardrailService:
     ]
     
     def __init__(self):
-        self.model = genai.GenerativeModel('gemini-2.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.0-flash')
         together_key = os.getenv("TOGETHER_API_KEY")
         self.together_client = Together(api_key=together_key) if together_key else None
         logger.info("Output Guardrail Service initialized")
