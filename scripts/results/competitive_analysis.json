@@ -1,0 +1,213 @@
+{
+  "systems": [
+    "ICDI-X",
+    "Perplexity AI",
+    "NotebookLM",
+    "Plain RAG"
+  ],
+  "features": [
+    {
+      "feature": "Dense vector retrieval",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2713",
+        "NotebookLM": "\u2713",
+        "Plain RAG": "\u2713"
+      }
+    },
+    {
+      "feature": "Multi-hop graph reasoning",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Information Bottleneck compression",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Multi-Armed Bandit strategy select.",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Quantum-inspired similarity",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "PDF document Q\\&A",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "~",
+        "NotebookLM": "\u2713",
+        "Plain RAG": "\u2713"
+      }
+    },
+    {
+      "feature": "Image / visual Q\\&A",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Multi-document cross-synthesis",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2713",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Web-augmented retrieval",
+      "values": {
+        "ICDI-X": "\u2717",
+        "Perplexity AI": "\u2713",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Proactive insight generation",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "~",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Bloom's taxonomy study guide",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Cross-doc contradiction detection",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Interactive knowledge graph",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Audio overview (TTS)",
+      "values": {
+        "ICDI-X": "~",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2713",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Streaming SSE responses",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2713",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Multi-turn conversation memory",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2713",
+        "NotebookLM": "\u2713",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Exact page-level citations",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2713",
+        "NotebookLM": "\u2713",
+        "Plain RAG": "~"
+      }
+    },
+    {
+      "feature": "Confidence / uncertainty score",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "~",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Input / output guardrails",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Ablation study reported",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2717"
+      }
+    },
+    {
+      "feature": "Open-source / reproducible",
+      "values": {
+        "ICDI-X": "\u2713",
+        "Perplexity AI": "\u2717",
+        "NotebookLM": "\u2717",
+        "Plain RAG": "\u2713"
+      }
+    }
+  ],
+  "icdi_x_unique_features": [
+    "Multi-hop graph reasoning",
+    "Information Bottleneck compression",
+    "Multi-Armed Bandit strategy select.",
+    "Quantum-inspired similarity",
+    "Image / visual Q\\&A",
+    "Proactive insight generation",
+    "Bloom's taxonomy study guide",
+    "Cross-doc contradiction detection",
+    "Interactive knowledge graph",
+    "Confidence / uncertainty score",
+    "Input / output guardrails",
+    "Ablation study reported"
+  ]
+}

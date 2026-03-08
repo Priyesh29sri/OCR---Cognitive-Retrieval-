@@ -33,11 +33,13 @@ class QueryRequest(BaseModel):
     """Query request model"""
     query: str = Field(..., description="User query string")
     document_id: Optional[str] = Field(None, description="Optional document ID to search within")
+    document_ids: Optional[List[str]] = Field(None, description="Multiple document IDs for cross-doc synthesis")
     use_graph_reasoning: bool = Field(True, description="Enable graph reasoning")
     use_quantum: bool = Field(False, description="Enable quantum retrieval")
     use_ib_filtering: bool = Field(True, description="Enable information bottleneck filtering")
     use_mab: bool = Field(True, description="Enable Multi-Armed Bandit retrieval selection")
     top_k: Optional[int] = Field(5, description="Number of results to retrieve")
+    conversation_id: Optional[int] = Field(None, description="Conversation ID for multi-turn memory")
 
 
 class EvidenceModel(BaseModel):
@@ -79,6 +81,15 @@ class RetrievalResultModel(BaseModel):
     evidence: Optional[List[EvidenceModel]] = []
 
 
+class CitationModel(BaseModel):
+    """Source citation with provenance — for exact chunk tracking"""
+    chunk_index: int                         # rank-based index (0 = most relevant)
+    text_preview: str                        # first 150 chars of the chunk
+    source_type: str = "text_paragraph"      # text_paragraph | table | figure
+    document_id: Optional[str] = None
+    relevance_score: float = 0.0
+
+
 class AnswerResponse(BaseModel):
     """Final answer response"""
     query: str
@@ -89,6 +100,7 @@ class AnswerResponse(BaseModel):
     reasoning_paths: Optional[List[str]] = []
     evidence_verification: Optional[Dict] = None
     mab_statistics: Optional[Dict] = None
+    citations: Optional[List[CitationModel]] = []  # Exact source chunks with provenance
     metadata: Optional[Dict] = None
 
 

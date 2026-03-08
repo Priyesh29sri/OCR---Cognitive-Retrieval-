@@ -23,7 +23,67 @@ interface QueryResponse {
     score: number;
     metadata?: Record<string, any>;
   }>;
+  citations?: Array<{
+    chunk_index: number;
+    text_preview: string;
+    source_type: string;
+    document_id?: string;
+    relevance_score: number;
+  }>;
   confidence?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface InsightsResponse {
+  doc_id: string;
+  doc_type: string;
+  complexity: 'basic' | 'intermediate' | 'advanced' | 'unknown';
+  insights: string[];
+  suggested_questions: string[];
+  key_entities: string[];
+  key_themes: string[];
+  ib_coverage: number;
+  chunks_analyzed: number;
+  chunks_selected_by_ib: number;
+  error?: string;
+}
+
+export interface StudyGuideResponse {
+  doc_id: string;
+  title: string;
+  summary: string;
+  key_concepts: string[];
+  vocabulary: Array<{ term: string; definition: string }>;
+  blooms_questions: {
+    remember: string[];
+    understand: string[];
+    apply: string[];
+    analyze: string[];
+    evaluate: string[];
+    create: string[];
+  };
+  concept_map: Array<{ from: string; relation: string; to: string }>;
+  estimated_study_time_minutes: number;
+  blooms_taxonomy_info: Record<string, string>;
+  error?: string;
+}
+
+export interface ContradictionResponse {
+  contradictions: Array<{
+    topic: string;
+    doc_a_claim: string;
+    doc_b_claim: string;
+    contradiction_type: 'direct' | 'implied' | 'scope' | 'methodology';
+    severity: 'high' | 'medium' | 'low';
+    confidence: number;
+    resolution: string;
+  }>;
+  agreements: string[];
+  summary: string;
+  overall_agreement_score: number;
+  doc_a_name: string;
+  doc_b_name: string;
+  error?: string;
 }
 
 // Storage keys
@@ -235,5 +295,134 @@ export function isAuthenticated(): boolean {
  */
 export async function healthCheck(): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE_URL}/`);
+  return response.json();
+}
+
+// ── Novel ICDI-X Features ────────────────────────────────────────────────────
+
+/**
+ * Get proactive insights for a document (IB-powered)
+ */
+export async function getInsights(docId: string): Promise<InsightsResponse> {
+  const response = await fetch(`${API_BASE_URL}/insights/${docId}`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Insights generation failed');
+  }
+  return response.json();
+}
+
+/**
+ * Get Bloom's Taxonomy study guide for a document
+ */
+export async function getStudyGuide(docId: string): Promise<StudyGuideResponse> {
+  const response = await fetch(`${API_BASE_URL}/studyguide/${docId}`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Study guide generation failed');
+  }
+  return response.json();
+}
+
+/**
+ * Detect contradictions between two documents
+ */
+export async function detectContradictions(
+  docAId: string,
+  docBId: string,
+  topic?: string
+): Promise<ContradictionResponse> {
+  const params = new URLSearchParams({
+    doc_a_id: docAId,
+    doc_b_id: docBId,
+    ...(topic ? { topic } : {}),
+  });
+  const response = await fetch(`${API_BASE_URL}/contradictions?${params}`, {
+    method: 'POST',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Contradiction detection failed');
+  }
+  return response.json();
+}
+
+/**
+ * Query across multiple documents simultaneously
+ */
+export async function queryMultiDoc(
+  question: string,
+  documentIds: string[]
+): Promise<QueryResponse> {
+  const response = await fetch(`${API_BASE_URL}/query_multi`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: question,
+      document_ids: documentIds,
+    }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Multi-document query failed');
+  }
+  return response.json();
+}
+
+/**
+ * Streaming query — returns an async generator of tokens (Perplexity-style)
+ * Usage:
+ *   for await (const event of queryStream("question", "doc_id")) {
+ *     if (event.done) { ... } else { appendToken(event.token); }
+ *   }
+ */
+export async function* queryStream(
+  question: string,
+  documentId?: string
+): AsyncGenerator<{ token: string; done: boolean; method?: string; citations?: QueryResponse['citations'] }> {
+  const response = await fetch(`${API_BASE_URL}/query/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: question, document_id: documentId }),
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error('Streaming query failed');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          yield JSON.parse(line.slice(6));
+        } catch {
+          // skip malformed event
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Get D3-compatible knowledge graph JSON
+ */
+export async function getKnowledgeGraphD3(): Promise<{
+  nodes: Array<{ id: string; label: string; group: string }>;
+  links: Array<{ source: string; target: string; relation: string; value: number }>;
+  stats: Record<string, any>;
+}> {
+  const response = await fetch(`${API_BASE_URL}/knowledge-graph/d3`);
+  if (!response.ok) {
+    throw new Error('Knowledge graph export failed');
+  }
   return response.json();
 }

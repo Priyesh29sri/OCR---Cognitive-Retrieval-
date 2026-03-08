@@ -69,7 +69,7 @@ class RAGService:
             document_id: Optional document ID to filter results
             
         Returns:
-            List of dictionaries with 'text' and 'score' keys
+            List of dictionaries with 'text', 'score', 'source_type', 'chunk_index', 'document_id' keys
         """
         # 1. Encode the query
         query_vector = self.embedder.encode(query).tolist()
@@ -77,13 +77,41 @@ class RAGService:
         # 2. Search in Qdrant with higher limit for better context and document filter
         results = await self.vector_repo.search(query_vector, limit=top_k, document_id=document_id)
         
-        # 3. Format results
+        # 3. Format results — include chunk_index and document_id for citation tracking
         formatted_results = []
-        for result in results:
+        for idx, result in enumerate(results):
             formatted_results.append({
                 "text": result.payload.get("original_text", ""),
                 "score": result.score,
-                "source_type": result.payload.get("source_type", "unknown")
+                "source_type": result.payload.get("source_type", "unknown"),
+                "document_id": result.payload.get("document_id", document_id),
+                "chunk_index": idx,  # rank-based index (0 = most relevant)
             })
         
         return formatted_results
+
+    async def retrieve_document_chunks(
+        self,
+        document_id: str,
+        limit: int = 50,
+        broad_query: str = "main topics key findings concepts methodology results",
+    ) -> list:
+        """
+        Retrieve a broad, representative sample of chunks for a document.
+        
+        Used by: InsightsService, StudyGuideService — which need document-wide context
+        rather than a targeted query.
+        
+        Args:
+            document_id: Document to retrieve chunks from
+            limit: Maximum number of chunks to fetch
+            broad_query: Generic query to maximise coverage (embeddings are still used)
+            
+        Returns:
+            List of chunk dicts (same format as retrieve())
+        """
+        return await self.retrieve(
+            query=broad_query,
+            top_k=limit,
+            document_id=document_id,
+        )

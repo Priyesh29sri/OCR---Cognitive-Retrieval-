@@ -1,9 +1,12 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, status, BackgroundTasks, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Annotated
+from fastapi.responses import StreamingResponse
+from typing import Annotated, AsyncGenerator
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import os
+import asyncio
+import json as json_module
 from sqlalchemy.orm import Session
 
 from app.services.vision_service import VisionService
@@ -13,7 +16,10 @@ from app.services.knowledge_graph_service import KnowledgeGraphService
 from app.services.retrieval_orchestrator import RetrievalOrchestrator
 from app.services.websocket_manager import ws_manager
 from app.services.agent_service import AgentService
-from app.models.retrieval_schemas import QueryRequest, AnswerResponse, PipelineSummary
+from app.services.insights_service import InsightsService
+from app.services.study_guide_service import StudyGuideService
+from app.services.contradiction_detector_service import ContradictionDetectorService
+from app.models.retrieval_schemas import QueryRequest, AnswerResponse, PipelineSummary, CitationModel
 
 # Database and Authentication
 from app.database.base import get_db, init_db
@@ -72,6 +78,11 @@ retrieval_orchestrator = RetrievalOrchestrator(rag_service, knowledge_graph)
 
 # Initialize Multi-Agent AI Team
 agent_service = AgentService()
+
+# Initialize novel ICDI-X features (beyond Perplexity / NotebookLM)
+insights_service = InsightsService()
+study_guide_service = StudyGuideService()
+contradiction_detector = ContradictionDetectorService()
 
 # Lifespan event: Runs once when the server starts
 @asynccontextmanager
@@ -361,6 +372,25 @@ async def query_documents(
                 detail=f"Query validation failed: {reason}"
             )
         
+        # ── Multi-turn memory: fetch prior conversation context ──────────────
+        conversation_history = ""
+        if request.conversation_id:
+            prior_convs = (
+                db.query(Conversation)
+                .filter(
+                    Conversation.document_id == int(request.document_id) if request.document_id else True,
+                    Conversation.user_id == (current_user.id if current_user else None)
+                )
+                .order_by(Conversation.created_at.desc())
+                .limit(5)
+                .all()
+            )
+            if prior_convs:
+                history_lines = []
+                for c in reversed(prior_convs):
+                    history_lines.append(f"User: {c.query}\nAssistant: {c.response[:300]}...")
+                conversation_history = "\n\n".join(history_lines)
+
         # Step 2: Execute ICDI-X retrieval pipeline
         retrieval_result = await retrieval_orchestrator.retrieve(
             query=request.query,
@@ -370,7 +400,20 @@ async def query_documents(
             use_mab=request.use_mab,
             use_quantum=request.use_quantum,
         )
-        
+
+        # ── Build citations from raw retrieval results ───────────────────────
+        raw_results = retrieval_result.get("results", [])
+        citations = [
+            CitationModel(
+                chunk_index=r.get("chunk_index", i),
+                text_preview=r.get("text", "")[:150],
+                source_type=r.get("source_type", "text_paragraph"),
+                document_id=r.get("document_id", request.document_id),
+                relevance_score=round(r.get("score", 0.0), 4),
+            )
+            for i, r in enumerate(raw_results[:5])
+        ]
+
         # Check if we got any context — if not, still try to answer or explain
         if not retrieval_result.get("context") or not retrieval_result.get("context").strip():
             return AnswerResponse(
@@ -378,12 +421,16 @@ async def query_documents(
                 answer="I could not find relevant content in the uploaded document for this query. This may happen if: (1) the document is still being indexed in the background — please wait 10-15 seconds and try again, or (2) the document doesn't contain information related to your question.",
                 context="",
                 method="no_context_fallback",
+                citations=[],
                 metadata={"warning": "No context found", "query": request.query}
             )
-        
-        # Step 2: Generate answer using Gemini with Together AI fallback
-        answer_prompt = f"""You are a helpful AI assistant analyzing a document. Answer the following question based on the provided context.
 
+        # Step 2: Generate answer using Gemini with Together AI fallback
+        history_block = (
+            f"\n\nConversation history (last 5 turns):\n{conversation_history}\n"
+            if conversation_history else ""
+        )
+        answer_prompt = f"""You are a helpful AI assistant analyzing a document. Answer the following question based on the provided context.{history_block}
 Question: {request.query}
 
 Context from the document:
@@ -395,8 +442,10 @@ Instructions:
 3. If the context doesn't fully answer the question, say what information is available
 4. Use specific details and examples from the context
 5. Be accurate and cite specific facts when possible
+6. If there is conversation history, consider the prior context for follow-up questions
 
 Answer:"""
+
         
         answer = None
         generation_error = None
@@ -512,6 +561,7 @@ Answer:"""
             reasoning_paths=retrieval_result.get('reasoning_paths', []),
             evidence_verification=verification,
             mab_statistics=retrieval_result.get('mab_stats'),
+            citations=citations,
             metadata={
                 "num_results": retrieval_result.get('num_results', 0),
                 "num_paths": retrieval_result.get('num_paths', 0),
@@ -700,3 +750,425 @@ async def websocket_chat_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         await ws_manager.disconnect(websocket)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ===== NOVEL ICDI-X FEATURES (beyond Perplexity & NotebookLM) =================
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ── 1. PROACTIVE INSIGHTS ENGINE ──────────────────────────────────────────────
+
+@app.get("/insights/{doc_id}")
+async def get_document_insights(
+    doc_id: str,
+    current_user: User = Depends(get_optional_user),
+):
+    """
+    🔬 Proactive Insights Engine (ICDI-X novel feature)
+
+    Automatically analyses the uploaded document and returns:
+    - 5-7 key insights (IB-selected, most information-dense content)
+    - 5 suggested questions (clickable in the frontend)
+    - Key entities and themes
+
+    Novel: Uses Information Bottleneck scoring to select the most
+    information-dense chunks BEFORE the user asks anything.
+    Neither Perplexity nor NotebookLM offers this.
+    """
+    try:
+        # Retrieve broad document coverage (up to 30 chunks)
+        chunks = await rag_service.retrieve_document_chunks(doc_id, limit=30)
+        result = await insights_service.generate_insights(
+            doc_id=doc_id,
+            chunks=chunks,
+            filename=f"document_{doc_id}",
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Insights error for doc {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Insights generation failed: {str(e)}")
+
+
+# ── 2. STUDY GUIDE GENERATOR ──────────────────────────────────────────────────
+
+@app.get("/studyguide/{doc_id}")
+async def get_study_guide(
+    doc_id: str,
+    current_user: User = Depends(get_optional_user),
+):
+    """
+    📚 Bloom's Taxonomy Study Guide Generator (ICDI-X novel feature)
+
+    Converts any document into a complete study guide with:
+    - 6-level Bloom's Taxonomy questions (Remember → Create)
+    - Key vocabulary with plain-language definitions
+    - Concept map (entity relationships)
+    - Estimated study time
+
+    Novel: No commercial document AI product generates Bloom's
+    taxonomy-classified questions from uploaded content.
+    """
+    try:
+        chunks = await rag_service.retrieve_document_chunks(doc_id, limit=30)
+        result = await study_guide_service.generate_study_guide(
+            doc_id=doc_id,
+            chunks=chunks,
+            filename=f"document_{doc_id}",
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Study guide error for doc {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Study guide generation failed: {str(e)}")
+
+
+# ── 3. CROSS-DOCUMENT CONTRADICTION DETECTOR ──────────────────────────────────
+
+@app.post("/contradictions")
+async def detect_contradictions(
+    doc_a_id: str,
+    doc_b_id: str,
+    topic: str = "",
+    current_user: User = Depends(get_optional_user),
+):
+    """
+    ⚡ Cross-Document Contradiction Detector (ICDI-X novel feature)
+
+    Compares two uploaded documents and identifies:
+    - Direct factual contradictions (with severity: high/medium/low)
+    - Implied incompatibilities
+    - Scope/methodology differences
+    - Shared agreements
+
+    Novel: No existing RAG product (Perplexity, NotebookLM, ChatPDF)
+    offers structured cross-document contradiction detection.
+
+    Use cases:
+    - Research: compare two papers on the same hypothesis
+    - Legal: detect contract vs regulation conflicts
+    - Medical: flag conflicting clinical guidelines
+    """
+    try:
+        query_topic = topic if topic else "main claims findings methodology conclusions"
+
+        # Retrieve representative chunks from each document
+        chunks_a = await rag_service.retrieve(query=query_topic, top_k=8, document_id=doc_a_id)
+        chunks_b = await rag_service.retrieve(query=query_topic, top_k=8, document_id=doc_b_id)
+
+        texts_a = [c["text"] for c in chunks_a]
+        texts_b = [c["text"] for c in chunks_b]
+
+        result = await contradiction_detector.detect_contradictions(
+            doc_a_chunks=texts_a,
+            doc_b_chunks=texts_b,
+            doc_a_name=f"Document {doc_a_id}",
+            doc_b_name=f"Document {doc_b_id}",
+            topic=topic,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Contradiction detection error: {e}")
+        raise HTTPException(status_code=500, detail=f"Contradiction detection failed: {str(e)}")
+
+
+# ── 4. MULTI-DOCUMENT CROSS-SYNTHESIS ─────────────────────────────────────────
+
+@app.post("/query_multi")
+async def query_multiple_documents(
+    request: QueryRequest,
+    current_user: User = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+):
+    """
+    🌐 Multi-Document Cross-Synthesis (ICDI-X novel feature)
+
+    Query across multiple uploaded documents simultaneously.
+    Retrieves relevant chunks from each doc_id in request.document_ids,
+    merges by relevance score, and synthesises a unified answer.
+
+    Novel: NotebookLM supports multi-doc but doesn't use IB+MAB+knowledge-graph
+    for cross-document retrieval. ICDI-X applies the full pipeline per document
+    then performs cross-document synthesis.
+
+    Usage: POST /query_multi with document_ids: ["id1", "id2", "id3"]
+    """
+    if not request.document_ids or len(request.document_ids) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least 2 document IDs in 'document_ids' for cross-document synthesis.",
+        )
+
+    try:
+        all_chunks = []
+        doc_contexts = {}
+
+        # Retrieve chunks from each document
+        for doc_id in request.document_ids[:5]:  # cap at 5 docs
+            doc_chunks = await rag_service.retrieve(
+                query=request.query,
+                top_k=6,
+                document_id=doc_id,
+            )
+            doc_contexts[doc_id] = "\n\n".join(c["text"] for c in doc_chunks)
+            all_chunks.extend(doc_chunks)
+
+        # Sort merged chunks by relevance score
+        all_chunks.sort(key=lambda x: x.get("score", 0), reverse=True)
+        merged_context = "\n\n---\n\n".join(c["text"] for c in all_chunks[:15])
+
+        if not merged_context.strip():
+            raise HTTPException(status_code=404, detail="No content found in the specified documents.")
+
+        # Build per-document summary for context
+        doc_summary = "\n".join(
+            f"[Doc {i+1} ({did})]: {ctx[:400]}..."
+            for i, (did, ctx) in enumerate(doc_contexts.items())
+        )
+
+        synthesis_prompt = f"""You are an expert research analyst. A user has uploaded {len(request.document_ids)} documents and is asking a cross-document question.
+
+QUESTION: {request.query}
+
+RETRIEVED CONTENT ACROSS ALL DOCUMENTS:
+{merged_context[:5000]}
+
+DOCUMENT BREAKDOWN:
+{doc_summary[:2000]}
+
+Instructions:
+1. Synthesise information from ALL documents to answer the question comprehensively
+2. Note where documents agree and where they differ
+3. Clearly attribute key points to specific documents when relevant (e.g., "Document 1 states...", "Document 2 argues...")
+4. Provide a unified, coherent answer in 3-4 paragraphs
+
+Answer:"""
+
+        answer = None
+        if gemini_model:
+            try:
+                resp = gemini_model.generate_content(synthesis_prompt)
+                answer = resp.text
+            except Exception as e:
+                logger.warning(f"Gemini failed in query_multi: {e}")
+
+        if not answer and together_client:
+            try:
+                resp = together_client.chat.completions.create(
+                    model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                    messages=[{"role": "user", "content": synthesis_prompt}],
+                    max_tokens=1200,
+                    temperature=0.3,
+                )
+                answer = resp.choices[0].message.content
+            except Exception as e:
+                logger.error(f"Together AI failed in query_multi: {e}")
+
+        if not answer:
+            answer = f"Cross-document synthesis: {merged_context[:500]}..."
+
+        citations = [
+            CitationModel(
+                chunk_index=i,
+                text_preview=c.get("text", "")[:150],
+                source_type=c.get("source_type", "text_paragraph"),
+                document_id=c.get("document_id"),
+                relevance_score=round(c.get("score", 0.0), 4),
+            )
+            for i, c in enumerate(all_chunks[:8])
+        ]
+
+        return AnswerResponse(
+            query=request.query,
+            answer=answer,
+            context=merged_context[:2000],
+            method="multi_document_synthesis",
+            citations=citations,
+            metadata={
+                "documents_queried": request.document_ids,
+                "total_chunks_retrieved": len(all_chunks),
+                "chunks_used": min(15, len(all_chunks)),
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Query multi error: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Multi-document query failed: {str(e)}")
+
+
+# ── 5. STREAMING SSE QUERY ────────────────────────────────────────────────────
+
+@app.post("/query/stream")
+async def query_stream(
+    request: QueryRequest,
+    current_user: User = Depends(get_optional_user),
+):
+    """
+    ⚡ Streaming Query via Server-Sent Events (Perplexity-style)
+
+    Streams the LLM response token-by-token so the UI feels instantaneous.
+    Uses the same ICDI-X retrieval pipeline as /query, then streams
+    the generation.
+
+    Frontend: consume with EventSource or fetch + ReadableStream.
+    Format: each SSE event is JSON: {"token": "...", "done": false}
+            final event: {"token": "", "done": true, "method": "...", "citations": [...]}
+    """
+
+    async def generate() -> AsyncGenerator[str, None]:
+        try:
+            # Input guardrail
+            is_valid, reason = input_guardrail.validate(request.query, check_toxicity=True)
+            if not is_valid:
+                yield f"data: {json_module.dumps({'error': reason, 'done': True})}\n\n"
+                return
+
+            # Retrieve context
+            retrieval_result = await retrieval_orchestrator.retrieve(
+                query=request.query,
+                document_id=request.document_id,
+                use_graph_reasoning=request.use_graph_reasoning,
+                use_ib_filtering=request.use_ib_filtering,
+                use_mab=request.use_mab,
+                use_quantum=request.use_quantum,
+            )
+
+            context = retrieval_result.get("context", "")
+            method = retrieval_result.get("method", "dense_vector")
+
+            # Build citations
+            raw_results = retrieval_result.get("results", [])
+            citations_data = [
+                {
+                    "chunk_index": i,
+                    "text_preview": r.get("text", "")[:120],
+                    "source_type": r.get("source_type", "text_paragraph"),
+                    "document_id": r.get("document_id", request.document_id),
+                    "relevance_score": round(r.get("score", 0.0), 4),
+                }
+                for i, r in enumerate(raw_results[:5])
+            ]
+
+            if not context.strip():
+                yield f"data: {json_module.dumps({'token': 'No relevant content found in the document. The document may still be indexing — please wait and retry.', 'done': True})}\n\n"
+                return
+
+            answer_prompt = f"""You are a helpful AI assistant. Answer the question based on the document context.
+
+Question: {request.query}
+
+Context:
+{context[:3000]}
+
+Answer concisely and accurately:"""
+
+            # Try Gemini streaming
+            streamed = False
+            try:
+                from google import genai as google_genai
+                g_client = google_genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+                for chunk in g_client.models.generate_content_stream(
+                    model="gemini-2.0-flash",
+                    contents=answer_prompt,
+                ):
+                    if chunk.text:
+                        yield f"data: {json_module.dumps({'token': chunk.text, 'done': False})}\n\n"
+                        await asyncio.sleep(0)  # yield control
+                streamed = True
+            except Exception as e:
+                logger.warning(f"Gemini stream failed: {e}")
+
+            # Fallback: Together AI (non-streaming, send all at once)
+            if not streamed and together_client:
+                try:
+                    resp = together_client.chat.completions.create(
+                        model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                        messages=[{"role": "user", "content": answer_prompt}],
+                        max_tokens=800,
+                        temperature=0.3,
+                    )
+                    text = resp.choices[0].message.content
+                    # Simulate streaming by sending in chunks of 8 words
+                    words = text.split()
+                    for i in range(0, len(words), 8):
+                        chunk_text = " ".join(words[i:i+8]) + " "
+                        yield f"data: {json_module.dumps({'token': chunk_text, 'done': False})}\n\n"
+                        await asyncio.sleep(0.03)
+                except Exception as e:
+                    logger.error(f"Together AI stream fallback failed: {e}")
+
+            # Final event with metadata
+            yield f"data: {json_module.dumps({'token': '', 'done': True, 'method': method, 'citations': citations_data})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+            yield f"data: {json_module.dumps({'error': str(e), 'done': True})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── 6. KNOWLEDGE GRAPH D3 EXPORT ──────────────────────────────────────────────
+
+@app.get("/knowledge-graph/d3")
+async def export_knowledge_graph_d3(
+    current_user: User = Depends(get_optional_user),
+):
+    """
+    🕸️ Knowledge Graph — D3.js-compatible export (ICDI-X novel feature)
+
+    Returns the knowledge graph as a D3 force-directed graph JSON:
+    {
+      "nodes": [{"id": str, "label": str, "group": str (entity_type)}, ...],
+      "links": [{"source": str, "target": str, "relation": str, "value": float}, ...]
+    }
+
+    Frontend: render with D3 forceSimulation for an interactive graph.
+    Novel: No commercial document AI tool exposes an interactive knowledge graph.
+    """
+    try:
+        raw = knowledge_graph.export_graph()
+        stats = knowledge_graph.get_graph_summary()
+
+        # Convert to D3 format
+        nodes = []
+        links = []
+        seen_nodes = set()
+
+        for entity_key, entity_data in raw.get("entities", {}).items():
+            node_id = entity_data.get("name", entity_key)
+            if node_id not in seen_nodes:
+                nodes.append({
+                    "id": node_id,
+                    "label": node_id,
+                    "group": entity_data.get("type", "CONCEPT"),
+                })
+                seen_nodes.add(node_id)
+
+        for rel in raw.get("relations", []):
+            src = rel.get("source", "")
+            tgt = rel.get("target", "")
+            if src and tgt:
+                links.append({
+                    "source": src,
+                    "target": tgt,
+                    "relation": rel.get("relation_type", "RELATED_TO"),
+                    "value": rel.get("confidence", 1.0),
+                })
+
+        return {
+            "nodes": nodes,
+            "links": links,
+            "stats": stats,
+        }
+    except Exception as e:
+        logger.error(f"KG D3 export error: {e}")
+        raise HTTPException(status_code=500, detail=f"Knowledge graph export failed: {str(e)}")
+
