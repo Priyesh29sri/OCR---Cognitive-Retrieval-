@@ -12,6 +12,8 @@ interface UploadResponse {
   message: string;
   summary?: string;
   pages?: number;
+  elements_detected?: number;
+  text_length?: number;
 }
 
 interface QueryResponse {
