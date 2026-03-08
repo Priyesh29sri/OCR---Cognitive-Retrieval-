@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
+  // standalone only for Docker (Koyeb/Render), not needed on Vercel
+  output: process.env.VERCEL ? undefined : 'standalone',
 }
 
 module.exports = nextConfig

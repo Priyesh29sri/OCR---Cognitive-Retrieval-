@@ -5,7 +5,6 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /
     envVars:
       - key: GEMINI_API_KEY
         sync: false
@@ -25,8 +24,8 @@ services:
     dockerfilePath: ./frontend/Dockerfile
     dockerContext: ./frontend
     dockerBuildArgs:
-      - key: NEXT_PUBLIC_API_URL
-        value: https://cognitive-retrieval-backend.onrender.com
+      NEXT_PUBLIC_API_URL: https://cognitive-retrieval-backend.onrender.com
     envVars:
       - key: NODE_ENV
         value: production
+
