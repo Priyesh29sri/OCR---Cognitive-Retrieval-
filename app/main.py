@@ -364,7 +364,11 @@ async def query_documents(
         # Step 2: Execute ICDI-X retrieval pipeline
         retrieval_result = await retrieval_orchestrator.retrieve(
             query=request.query,
-            document_id=request.document_id
+            document_id=request.document_id,
+            use_graph_reasoning=request.use_graph_reasoning,
+            use_ib_filtering=request.use_ib_filtering,
+            use_mab=request.use_mab,
+            use_quantum=request.use_quantum,
         )
         
         # Check if we got any context — if not, still try to answer or explain

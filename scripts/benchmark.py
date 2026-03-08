@@ -1,408 +1,287 @@
 """
-Benchmark Script
-Comprehensive performance evaluation of ICDI-X
-
+ICDI-X Benchmark — Paper-Quality Evaluation
+============================================
 Metrics:
-- Precision, Recall, F1 Score
-- BLEU Score (answer quality)
-- Faithfulness (hallucination rate)
-- Latency (response time)
-- Confidence Calibration
+  - BLEU-4            (nltk corpus_bleu, SmoothingFunction)
+  - ROUGE-L           (rouge-score)
+  - Keyword Recall    (fraction of ground-truth keywords in answer)
+  - Faithfulness      (answer tokens supported by retrieved context)
+  - Answer Relevancy  (answer tokens that match query keywords)
+  - Expected Calibration Error (ECE) — confidence calibration
+  - Latency (ms)      per pipeline stage via /query metadata
+
+Usage:
+  python scripts/benchmark.py --doc_id <id> --samples 50
+  python scripts/benchmark.py --doc_id <id> --api http://127.0.0.1:8000 --samples 100
 """
 
-import asyncio
-import time
-import json
-from typing import Dict, List, Tuple
+import sys, os, json, time, argparse, statistics, ssl
 from pathlib import Path
-import sys
-import statistics
-
-# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from evaluation_dataset import get_dataset, get_adversarial_dataset, get_edge_cases
-# from app.services.agent_service import AgentService
-# from app.services.vision_service import VisionService
-from app.services.input_guardrail_service import InputGuardrailService
-from app.services.output_guardrail_service import OutputGuardrailService
+try:
+    ssl._create_default_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+
+import nltk
+for _pkg in ("punkt", "punkt_tab", "stopwords"):
+    try:
+        nltk.data.find(f"tokenizers/{_pkg}")
+    except LookupError:
+        nltk.download(_pkg, quiet=True)
+
+import requests
+from nltk.translate.bleu_score import corpus_bleu, SmoothingFunction
+from rouge_score import rouge_scorer
+
+from hotpotqa_dataset import get_dataset
 
 
-class Benchmark:
-    """Comprehensive benchmarking for ICDI-X"""
-    
-    def __init__(self):
-        # Agent services not needed for demonstration
-        # self.vision_service = VisionService()
-        # self.agent_service = AgentService(self.vision_service)
-        self.input_guardrail = InputGuardrailService()
-        self.output_guardrail = OutputGuardrailService()
-        self.results = {
-            "accuracy_metrics": {},
-            "quality_metrics": {},
-            "performance_metrics": {},
-            "security_metrics": {}
-        }
-    
-    # ==================== Accuracy Metrics ====================
-    
-    def calculate_precision_recall_f1(self, predicted: str, ground_truth: str) -> Tuple[float, float, float]:
-        """Calculate precision, recall, and F1 score"""
-        pred_tokens = set(predicted.lower().split())
-        truth_tokens = set(ground_truth.lower().split())
-        
-        if not pred_tokens or not truth_tokens:
-            return 0.0, 0.0, 0.0
-        
-        intersection = pred_tokens & truth_tokens
-        
-        precision = len(intersection) / len(pred_tokens) if pred_tokens else 0.0
-        recall = len(intersection) / len(truth_tokens) if truth_tokens else 0.0
-        
-        if precision + recall == 0:
-            f1 = 0.0
-        else:
-            f1 = 2 * (precision * recall) / (precision + recall)
-        
-        return precision, recall, f1
-    
-    def calculate_bleu(self, predicted: str, ground_truth: str) -> float:
-        """
-        Calculate BLEU score (simplified unigram BLEU)
-        
-        Full BLEU requires n-gram matching, this is a simplified version
-        """
-        pred_tokens = predicted.lower().split()
-        truth_tokens = ground_truth.lower().split()
-        
-        if not pred_tokens or not truth_tokens:
-            return 0.0
-        
-        # Count matching unigrams
-        matches = sum(1 for token in pred_tokens if token in truth_tokens)
-        
-        # BLEU = (matches / predicted_length) * brevity_penalty
-        precision = matches / len(pred_tokens)
-        
-        # Brevity penalty
-        if len(pred_tokens) < len(truth_tokens):
-            bp = len(pred_tokens) / len(truth_tokens)
-        else:
-            bp = 1.0
-        
-        return precision * bp
-    
-    def calculate_faithfulness(self, answer: str, evidence: List[str]) -> float:
-        """
-        Calculate faithfulness score (how well answer is grounded in evidence)
-        
-        Returns score 0.0-1.0 where 1.0 is fully faithful
-        """
-        if not evidence or not answer:
-            return 0.0
-        
-        answer_tokens = set(answer.lower().split())
-        evidence_tokens = set()
-        
-        for ev in evidence:
-            evidence_tokens.update(ev.lower().split())
-        
-        if not answer_tokens:
-            return 0.0
-        
-        # Calculate what percentage of answer is supported by evidence
-        supported = answer_tokens & evidence_tokens
-        faithfulness = len(supported) / len(answer_tokens)
-        
-        return faithfulness
-    
-    # ==================== Performance Metrics ====================
-    
-    async def measure_latency(self, query: str) -> Tuple[float, Dict]:
-        """Measure query processing latency"""
-        start_time = time.time()
-        
-        try:
-            # Mock query processing for demonstration
-            # In production, replace with: result = await self.agent_service.process_query(query)
-            await asyncio.sleep(0.1)  # Simulate processing time
-            result = {
-                "answer": "This is a comprehensive answer based on the document analysis.",
-                "confidence_score": 0.85,
-                "evidence_sources": ["Section 3.1", "Figure 2", "Table 1"],
-                "retrieval_method": "dense+graph"
+API_BASE = "http://127.0.0.1:8000"
+STOPWORDS = {"what", "is", "the", "how", "does", "a", "an", "of", "in", "to", "for", "and", "or", "this"}
+
+
+def tokenize(text: str) -> list:
+    return nltk.word_tokenize(text.lower())
+
+
+def compute_bleu4(predictions: list, references: list) -> float:
+    hyps = [tokenize(p) for p in predictions]
+    refs = [[tokenize(r)] for r in references]
+    sf = SmoothingFunction().method1
+    return corpus_bleu(refs, hyps, weights=(0.25, 0.25, 0.25, 0.25), smoothing_function=sf)
+
+
+def compute_rouge_l(predictions: list, references: list) -> dict:
+    scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=True)
+    p_scores, r_scores, f_scores = [], [], []
+    for pred, ref in zip(predictions, references):
+        result = scorer.score(ref, pred)
+        p_scores.append(result["rougeL"].precision)
+        r_scores.append(result["rougeL"].recall)
+        f_scores.append(result["rougeL"].fmeasure)
+    return {
+        "precision": statistics.mean(p_scores),
+        "recall":    statistics.mean(r_scores),
+        "f1":        statistics.mean(f_scores),
+    }
+
+
+def compute_keyword_recall(answer: str, keywords: list) -> float:
+    if not keywords:
+        return 1.0
+    answer_lower = answer.lower()
+    hits = sum(1 for kw in keywords if kw.lower() in answer_lower)
+    return hits / len(keywords)
+
+
+def compute_faithfulness(answer: str, context: str) -> float:
+    if not context:
+        return 0.0
+    answer_tokens = set(tokenize(answer)) - STOPWORDS
+    context_tokens = set(tokenize(context))
+    if not answer_tokens:
+        return 0.0
+    return len(answer_tokens & context_tokens) / len(answer_tokens)
+
+
+def compute_answer_relevancy(answer: str, query: str) -> float:
+    query_tokens = set(tokenize(query)) - STOPWORDS
+    answer_tokens = set(tokenize(answer))
+    if not query_tokens:
+        return 1.0
+    return len(answer_tokens & query_tokens) / len(query_tokens)
+
+
+def compute_f1_token(predicted: str, ground_truth: str) -> float:
+    pred  = set(tokenize(predicted))  - STOPWORDS
+    truth = set(tokenize(ground_truth)) - STOPWORDS
+    if not pred or not truth:
+        return 0.0
+    inter = pred & truth
+    p = len(inter) / len(pred)
+    r = len(inter) / len(truth)
+    return 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+
+
+def compute_ece(calibration_pairs: list, n_bins: int = 10) -> float:
+    bins = [[] for _ in range(n_bins)]
+    for conf, correct in calibration_pairs:
+        idx = min(int(conf * n_bins), n_bins - 1)
+        bins[idx].append((conf, correct))
+    ece, n = 0.0, len(calibration_pairs)
+    for b in bins:
+        if not b:
+            continue
+        avg_conf = sum(x[0] for x in b) / len(b)
+        avg_acc  = sum(int(x[1]) for x in b) / len(b)
+        ece += (len(b) / n) * abs(avg_conf - avg_acc)
+    return ece
+
+
+def query_backend(question: str, document_id: str, api_base: str, flags: dict = None) -> dict:
+    payload = {"query": question, "document_id": document_id}
+    if flags:
+        payload.update(flags)
+    t0 = time.perf_counter()
+    try:
+        resp = requests.post(f"{api_base}/query", json=payload, timeout=90)
+        lat = (time.perf_counter() - t0) * 1000
+        if resp.status_code == 200:
+            d = resp.json()
+            d["_latency_ms"] = lat
+            return d
+        return {"answer": "", "context": "", "_latency_ms": lat, "_error": resp.text, "metadata": {}}
+    except Exception as e:
+        lat = (time.perf_counter() - t0) * 1000
+        return {"answer": "", "context": "", "_latency_ms": lat, "_error": str(e), "metadata": {}}
+
+
+def run_benchmark(document_id: str, api_base: str = API_BASE, samples: int = 50,
+                  flags: dict = None, label: str = "ICDI-X") -> dict:
+    dataset = get_dataset()[:samples]
+    print(f"\n{'='*72}")
+    print(f"{label}  |  {len(dataset)} queries  |  doc_id={document_id}")
+    print(f"{'='*72}")
+
+    predictions, references = [], []
+    kw_recalls, faithfulness_scores, relevancy_scores, f1_scores = [], [], [], []
+    latencies, calibration_pairs = [], []
+    errors = 0
+    by_category: dict = {}
+
+    for i, item in enumerate(dataset, 1):
+        q, ref = item["query"], item["ground_truth"]
+        kws     = item.get("keywords", [])
+        cat     = item.get("category", "unknown")
+        diff    = item.get("difficulty", "?")
+
+        result  = query_backend(q, document_id, api_base, flags)
+        answer  = result.get("answer", "")
+        context = result.get("context", "")
+        lat     = result.get("_latency_ms", 0)
+        conf    = float(result.get("metadata", {}).get("confidence_score", 0.5))
+        err     = result.get("_error")
+
+        if err or not answer.strip():
+            errors += 1
+            print(f"  [{i:3d}] ⚠  {str(err or 'empty answer')[:60]}")
+            continue
+
+        f1  = compute_f1_token(answer, ref)
+        kwr = compute_keyword_recall(answer, kws)
+        fai = compute_faithfulness(answer, context)
+        rel = compute_answer_relevancy(answer, q)
+
+        predictions.append(answer)
+        references.append(ref)
+        kw_recalls.append(kwr)
+        faithfulness_scores.append(fai)
+        relevancy_scores.append(rel)
+        f1_scores.append(f1)
+        latencies.append(lat)
+        calibration_pairs.append((conf, f1 > 0.3))
+
+        by_category.setdefault(cat, {"f1": [], "kwr": []})
+        by_category[cat]["f1"].append(f1)
+        by_category[cat]["kwr"].append(kwr)
+
+        print(f"  [{i:3d}] {cat:<12} {diff:<7} | F1={f1:.2f}  KWR={kwr:.2f}  Faith={fai:.2f}  Lat={lat:.0f}ms")
+
+    if not predictions:
+        print("  No successful predictions — check API + doc_id.")
+        return {}
+
+    bleu4   = compute_bleu4(predictions, references)
+    rouge_l = compute_rouge_l(predictions, references)
+    ece     = compute_ece(calibration_pairs)
+
+    results = {
+        "label":              label,
+        "n_queries":          len(predictions),
+        "n_errors":           errors,
+        "bleu4":              round(bleu4, 4),
+        "rouge_l_precision":  round(rouge_l["precision"], 4),
+        "rouge_l_recall":     round(rouge_l["recall"], 4),
+        "rouge_l_f1":         round(rouge_l["f1"], 4),
+        "avg_f1_token":       round(statistics.mean(f1_scores), 4),
+        "avg_keyword_recall": round(statistics.mean(kw_recalls), 4),
+        "avg_faithfulness":   round(statistics.mean(faithfulness_scores), 4),
+        "avg_answer_relevancy": round(statistics.mean(relevancy_scores), 4),
+        "ece":                round(ece, 4),
+        "avg_latency_ms":     round(statistics.mean(latencies), 1),
+        "median_latency_ms":  round(statistics.median(latencies), 1),
+        "p95_latency_ms":     round(sorted(latencies)[int(len(latencies) * 0.95)], 1),
+        "by_category": {
+            cat: {
+                "avg_f1": round(statistics.mean(v["f1"]), 4),
+                "avg_kwr": round(statistics.mean(v["kwr"]), 4),
+                "n": len(v["f1"]),
             }
-            latency = (time.time() - start_time) * 1000  # ms
-            return latency, result
-        except Exception as e:
-            latency = (time.time() - start_time) * 1000
-            return latency, {"error": str(e), "answer": "", "confidence_score": 0.0}
-    
-    def calculate_confidence_calibration(self, predictions: List[Tuple[float, bool]]) -> float:
-        """
-        Calculate confidence calibration (Expected Calibration Error)
-        
-        Args:
-            predictions: List of (confidence_score, is_correct) tuples
-            
-        Returns:
-            ECE score (lower is better, 0 is perfectly calibrated)
-        """
-        if not predictions:
-            return 0.0
-        
-        # Group predictions into bins
-        bins = [[] for _ in range(10)]
-        
-        for confidence, is_correct in predictions:
-            bin_idx = min(int(confidence * 10), 9)
-            bins[bin_idx].append(is_correct)
-        
-        # Calculate ECE
-        ece = 0.0
-        n_total = len(predictions)
-        
-        for i, bin_predictions in enumerate(bins):
-            if not bin_predictions:
-                continue
-            
-            # Average confidence in this bin
-            avg_confidence = (i + 0.5) / 10
-            
-            # Average accuracy in this bin
-            avg_accuracy = sum(bin_predictions) / len(bin_predictions)
-            
-            # Weight by bin size
-            weight = len(bin_predictions) / n_total
-            
-            # Add to ECE
-            ece += weight * abs(avg_confidence - avg_accuracy)
-        
-        return ece
-    
-    # ==================== Security Metrics ====================
-    
-    def test_guardrails(self, adversarial_queries: List[str]) -> Dict:
-        """Test input guardrails against adversarial queries"""
-        blocked = 0
-        false_positives = 0
-        
-        for query in adversarial_queries:
-            is_valid, reason = self.input_guardrail.validate(query, check_toxicity=False)
-            
-            if not is_valid:
-                blocked += 1
-                print(f"✓ Blocked: {query[:50]}... | Reason: {reason}")
-            else:
-                false_positives += 1
-                print(f"✗ Allowed: {query[:50]}...")
-        
-        block_rate = blocked / len(adversarial_queries)
-        
-        return {
-            "total_adversarial": len(adversarial_queries),
-            "blocked": blocked,
-            "block_rate": block_rate,
-            "false_negatives": false_positives
-        }
-    
-    def test_edge_cases(self, edge_queries: List[str]) -> Dict:
-        """Test handling of edge case queries"""
-        handled = 0
-        errors = 0
-        
-        for query in edge_queries:
-            is_valid, reason = self.input_guardrail.validate(query, check_toxicity=False)
-            
-            if not is_valid and reason:
-                handled += 1
-                print(f"✓ Handled edge case: {repr(query[:50])}")
-            else:
-                errors += 1
-                print(f"✗ Not handled: {repr(query[:50])}")
-        
-        return {
-            "total_edge_cases": len(edge_queries),
-            "handled": handled,
-            "handle_rate": handled / len(edge_queries)
-        }
-    
-    # ==================== Main Benchmark ====================
-    
-    async def run_accuracy_benchmark(self, queries: List[Dict]) -> Dict:
-        """Run accuracy metrics benchmark"""
-        print("\n" + "="*60)
-        print("ACCURACY METRICS")
-        print("="*60)
-        
-        precisions = []
-        recalls = []
-        f1_scores = []
-        bleu_scores = []
-        faithfulness_scores = []
-        predictions = []  # For calibration
-        
-        for i, item in enumerate(queries, 1):
-            query = item["query"]
-            ground_truth = item["ground_truth"]
-            
-            print(f"\n[{i}/{len(queries)}] {query[:60]}...")
-            
-            # Get prediction
-            latency, result = await self.measure_latency(query)
-            predicted = result.get("answer", "")
-            confidence = result.get("confidence_score", 0.0)
-            evidence = result.get("evidence_sources", [])
-            
-            # Calculate metrics
-            precision, recall, f1 = self.calculate_precision_recall_f1(predicted, ground_truth)
-            bleu = self.calculate_bleu(predicted, ground_truth)
-            faithfulness = self.calculate_faithfulness(predicted, evidence)
-            
-            # Check if answer is correct (F1 > 0.5 threshold)
-            is_correct = f1 > 0.5
-            predictions.append((confidence, is_correct))
-            
-            precisions.append(precision)
-            recalls.append(recall)
-            f1_scores.append(f1)
-            bleu_scores.append(bleu)
-            faithfulness_scores.append(faithfulness)
-            
-            print(f"  P: {precision:.3f} | R: {recall:.3f} | F1: {f1:.3f} | BLEU: {bleu:.3f} | Faith: {faithfulness:.3f}")
-        
-        # Calculate calibration
-        ece = self.calculate_confidence_calibration(predictions)
-        
-        return {
-            "avg_precision": statistics.mean(precisions),
-            "avg_recall": statistics.mean(recalls),
-            "avg_f1": statistics.mean(f1_scores),
-            "avg_bleu": statistics.mean(bleu_scores),
-            "avg_faithfulness": statistics.mean(faithfulness_scores),
-            "confidence_ece": ece,
-            "total_queries": len(queries)
-        }
-    
-    async def run_performance_benchmark(self, queries: List[Dict]) -> Dict:
-        """Run performance metrics benchmark"""
-        print("\n" + "="*60)
-        print("PERFORMANCE METRICS")
-        print("="*60)
-        
-        latencies = []
-        
-        for i, item in enumerate(queries[:10], 1):  # Sample 10 queries
-            query = item["query"]
-            
-            print(f"\n[{i}/10] Measuring latency: {query[:60]}...")
-            
-            latency, _ = await self.measure_latency(query)
-            latencies.append(latency)
-            
-            print(f"  Latency: {latency:.0f}ms")
-        
-        return {
-            "avg_latency_ms": statistics.mean(latencies),
-            "median_latency_ms": statistics.median(latencies),
-            "p95_latency_ms": sorted(latencies)[int(len(latencies) * 0.95)],
-            "p99_latency_ms": sorted(latencies)[int(len(latencies) * 0.99)],
-            "min_latency_ms": min(latencies),
-            "max_latency_ms": max(latencies)
-        }
-    
-    async def run_security_benchmark(self) -> Dict:
-        """Run security metrics benchmark"""
-        print("\n" + "="*60)
-        print("SECURITY METRICS")
-        print("="*60)
-        
-        # Test adversarial queries
-        print("\nTesting adversarial queries...")
-        adversarial = get_adversarial_dataset()
-        guardrail_results = self.test_guardrails(adversarial)
-        
-        # Test edge cases
-        print("\nTesting edge cases...")
-        edge_cases = get_edge_cases()
-        edge_results = self.test_edge_cases(edge_cases)
-        
-        return {
-            "guardrail_performance": guardrail_results,
-            "edge_case_handling": edge_results
-        }
-    
-    async def run_full_benchmark(self, sample_size: int = 50):
-        """
-        Run complete benchmark suite
-        
-        Args:
-            sample_size: Number of queries to test
-        """
-        print("="*60)
-        print("ICDI-X COMPREHENSIVE BENCHMARK")
-        print("="*60)
-        
-        # Get evaluation dataset
-        queries = get_dataset()[:sample_size]
-        print(f"\nBenchmarking on {len(queries)} queries")
-        
-        # Run benchmarks
-        self.results["accuracy_metrics"] = await self.run_accuracy_benchmark(queries)
-        self.results["performance_metrics"] = await self.run_performance_benchmark(queries)
-        self.results["security_metrics"] = await self.run_security_benchmark()
-        
-        # Print summary
-        self.print_summary()
-        
-        # Save results
-        self.save_results()
-    
-    def print_summary(self):
-        """Print benchmark summary"""
-        print("\n" + "="*80)
-        print("BENCHMARK SUMMARY")
-        print("="*80)
-        
-        # Accuracy
-        acc = self.results["accuracy_metrics"]
-        print("\nAccuracy Metrics:")
-        print(f"  Precision:      {acc['avg_precision']:.3f}")
-        print(f"  Recall:         {acc['avg_recall']:.3f}")
-        print(f"  F1 Score:       {acc['avg_f1']:.3f}")
-        print(f"  BLEU Score:     {acc['avg_bleu']:.3f}")
-        print(f"  Faithfulness:   {acc['avg_faithfulness']:.3f}")
-        print(f"  Calibration ECE: {acc['confidence_ece']:.3f}")
-        
-        # Performance
-        perf = self.results["performance_metrics"]
-        print("\nPerformance Metrics:")
-        print(f"  Avg Latency:    {perf['avg_latency_ms']:.0f}ms")
-        print(f"  Median Latency: {perf['median_latency_ms']:.0f}ms")
-        print(f"  P95 Latency:    {perf['p95_latency_ms']:.0f}ms")
-        print(f"  P99 Latency:    {perf['p99_latency_ms']:.0f}ms")
-        
-        # Security
-        sec = self.results["security_metrics"]
-        print("\nSecurity Metrics:")
-        print(f"  Adversarial Block Rate: {sec['guardrail_performance']['block_rate']:.1%}")
-        print(f"  Edge Case Handle Rate:  {sec['edge_case_handling']['handle_rate']:.1%}")
-        
-        print("\n" + "="*80)
-    
-    def save_results(self):
-        """Save results to JSON file"""
-        output_path = Path(__file__).parent / "benchmark_results.json"
-        with open(output_path, "w") as f:
-            json.dump(self.results, f, indent=2)
-        print(f"\nResults saved to: {output_path}")
+            for cat, v in by_category.items()
+        },
+    }
+
+    print(f"\n{'─'*72}")
+    print(f"  BLEU-4              : {results['bleu4']:.4f}")
+    print(f"  ROUGE-L F1          : {results['rouge_l_f1']:.4f}")
+    print(f"  Token F1            : {results['avg_f1_token']:.4f}")
+    print(f"  Keyword Recall      : {results['avg_keyword_recall']:.4f}")
+    print(f"  Faithfulness        : {results['avg_faithfulness']:.4f}")
+    print(f"  Answer Relevancy    : {results['avg_answer_relevancy']:.4f}")
+    print(f"  ECE (↓ better)      : {results['ece']:.4f}")
+    print(f"  Avg Latency         : {results['avg_latency_ms']:.1f} ms")
+    print(f"  P95 Latency         : {results['p95_latency_ms']:.1f} ms")
+    print(f"  Errors              : {errors}/{len(dataset)}")
+    print(f"{'='*72}")
+
+    if by_category:
+        print("\n  Per-category F1:")
+        for cat, stats in results["by_category"].items():
+            print(f"    {cat:<14} : F1={stats['avg_f1']:.3f}  KWR={stats['avg_kwr']:.3f}  (n={stats['n']})")
+
+    return results
 
 
-async def main():
-    """Run benchmark"""
-    benchmark = Benchmark()
-    await benchmark.run_full_benchmark(sample_size=20)  # Use 20 for quick test, 50+ for full
+def print_latex_table(results_by_system: dict):
+    print("\n% ── LaTeX Table ────────────────────────────────────────────────")
+    print(r"\begin{table}[h]")
+    print(r"\centering")
+    print(r"\resizebox{\columnwidth}{!}{%")
+    print(r"\begin{tabular}{lcccccc}")
+    print(r"\toprule")
+    print(r"System & BLEU-4 & ROUGE-L & Token F1 & KW-Recall & Faithfulness & Lat (ms) \\")
+    print(r"\midrule")
+    for name, r in results_by_system.items():
+        if not r:
+            continue
+        print(
+            f"{name} & {r.get('bleu4', 0):.3f} & {r.get('rouge_l_f1', 0):.3f} & "
+            f"{r.get('avg_f1_token', 0):.3f} & {r.get('avg_keyword_recall', 0):.3f} & "
+            f"{r.get('avg_faithfulness', 0):.3f} & {r.get('avg_latency_ms', 0):.0f} \\\\"
+        )
+    print(r"\bottomrule")
+    print(r"\end{tabular}}")
+    print(r"\caption{ICDI-X evaluation on 100-item multi-hop QA dataset.}")
+    print(r"\label{tab:main_results}")
+    print(r"\end{table}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="ICDI-X Paper-Quality Benchmark")
+    parser.add_argument("--api",    default=API_BASE)
+    parser.add_argument("--doc_id", required=True, help="Document ID returned by /upload")
+    parser.add_argument("--samples", type=int, default=50)
+    parser.add_argument("--output", default="scripts/benchmark_results.json")
+    parser.add_argument("--label",  default="ICDI-X (Full)")
+    args = parser.parse_args()
+
+    results = run_benchmark(args.doc_id, args.api, args.samples, label=args.label)
+
+    out_path = Path(__file__).parent.parent / args.output
+    with open(out_path, "w") as f:
+        json.dump({args.label: results}, f, indent=2)
+    print(f"\nResults saved → {out_path}")
+    print_latex_table({args.label: results})

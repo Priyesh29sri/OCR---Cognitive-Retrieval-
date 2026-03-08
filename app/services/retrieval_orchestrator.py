@@ -52,57 +52,74 @@ class RetrievalOrchestrator:
         
         logger.info("Retrieval Orchestrator initialized - ICDI-X pipeline ready")
     
-    async def retrieve(self, query: str, document_id: Optional[str] = None) -> Dict:
-        """
-        Main retrieval pipeline.
-        
-        Args:
-            query: User query
-            document_id: Optional document to search within
-            
-        Returns:
-            Dict with retrieved context, reasoning paths, and metadata
-        """
+    async def retrieve(
+        self,
+        query: str,
+        document_id: Optional[str] = None,
+        use_graph_reasoning: bool = True,
+        use_ib_filtering: bool = True,
+        use_mab: bool = True,
+        use_quantum: bool = False,
+    ) -> Dict:
+        import time as _time
+        stage_timings: Dict[str, float] = {}
+
         logger.info(f"=" * 80)
         logger.info(f"ICDI-X Retrieval Pipeline: {query}")
         if document_id:
             logger.info(f"Document ID: {document_id}")
         logger.info(f"=" * 80)
-        
+
         # Step 1: Query Planning
         logger.info("[Step 1] Query Planning")
+        _t = _time.perf_counter()
         plan = self.agentic_planner.create_plan(query)
+        stage_timings["planning_ms"] = round((_time.perf_counter() - _t) * 1000, 1)
         logger.info(f"Plan: {plan}")
-        
-        # Step 2: Execute Retrieval based on strategy
+
+        # Override plan flags from request
+        plan.use_ib_filtering = use_ib_filtering
+        plan.use_quantum = use_quantum
+
+        # Step 2: Execute Retrieval based on strategy (MAB-controlled or forced dense)
         logger.info("[Step 2] Executing Retrieval")
-        
-        if plan.retrieval_strategy == RetrievalStrategy.GRAPH_REASONING:
+        _t = _time.perf_counter()
+
+        if use_mab:
+            selected_arm = self.mab_retrieval.select_arm()
+        else:
+            selected_arm = "dense"
+
+        if use_graph_reasoning and plan.retrieval_strategy == RetrievalStrategy.GRAPH_REASONING:
             result = await self._graph_retrieval(query, plan, document_id)
-        
         elif plan.retrieval_strategy == RetrievalStrategy.HIERARCHICAL:
             result = await self._hierarchical_retrieval(query, plan, document_id)
-        
         elif plan.retrieval_strategy == RetrievalStrategy.HYBRID:
             result = await self._hybrid_retrieval(query, plan, document_id)
-        
-        else:  # DENSE_VECTOR
+        else:
             result = await self._dense_retrieval(query, plan, document_id)
-        
-        # Step 3: Apply Information Bottleneck Filtering
-        if plan.use_ib_filtering and result.get("context"):
+
+        stage_timings["retrieval_ms"] = round((_time.perf_counter() - _t) * 1000, 1)
+
+        # Step 3: Information Bottleneck Filtering
+        if use_ib_filtering and result.get("context"):
             logger.info("[Step 3] Applying Information Bottleneck Filtering")
+            _t = _time.perf_counter()
             result["context"] = self.ib_filter.filter_context(result["context"], query)
-        
+            stage_timings["ib_filter_ms"] = round((_time.perf_counter() - _t) * 1000, 1)
+
         # Step 4: Evidence Verification
         logger.info("[Step 4] Evidence Verification (preparing for generation)")
+        _t = _time.perf_counter()
         evidence_list = [Evidence(result["context"], "retrieved_context")]
         result["evidence"] = evidence_list
-        
-        # Step 5: Return comprehensive result
+        stage_timings["evidence_prep_ms"] = round((_time.perf_counter() - _t) * 1000, 1)
+
+        # Step 5: Metadata
         result["query_plan"] = self.agentic_planner.explain_plan(plan)
         result["mab_stats"] = self.mab_retrieval.get_arm_statistics()
-        
+        result["stage_timings"] = stage_timings
+
         logger.info(f"Retrieval complete - {len(result.get('context', ''))} chars of context")
         return result
     

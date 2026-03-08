@@ -36,6 +36,7 @@ class QueryRequest(BaseModel):
     use_graph_reasoning: bool = Field(True, description="Enable graph reasoning")
     use_quantum: bool = Field(False, description="Enable quantum retrieval")
     use_ib_filtering: bool = Field(True, description="Enable information bottleneck filtering")
+    use_mab: bool = Field(True, description="Enable Multi-Armed Bandit retrieval selection")
     top_k: Optional[int] = Field(5, description="Number of results to retrieve")
 
 
