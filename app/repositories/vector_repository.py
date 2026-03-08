@@ -1,12 +1,19 @@
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models
 import uuid
+import os
 
 class VectorRepository:
     def __init__(self):
-        # Use persistent storage on disk instead of in-memory
-        # This ensures data persists across requests and server restarts
-        self.db_client = AsyncQdrantClient(path="./qdrant_data")
+        qdrant_url = os.getenv("QDRANT_URL")
+        qdrant_api_key = os.getenv("QDRANT_API_KEY")
+
+        if qdrant_url and qdrant_api_key:
+            # Qdrant Cloud (production)
+            self.db_client = AsyncQdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+        else:
+            # Local file storage (development)
+            self.db_client = AsyncQdrantClient(path="./qdrant_data")
         self.collection_name = "document_knowledgebase"
 
     async def create_collection(self, size: int = 1536) -> None:
