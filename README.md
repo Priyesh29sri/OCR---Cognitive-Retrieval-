@@ -1,3 +1,13 @@
+---
+title: Cognitive Retrieval Backend
+emoji: 🤖
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Cognitive Retrieval — AI-Powered Document Intelligence
 
 > Upload any PDF or image and ask questions in natural language. Powered by a multi-agent RAG pipeline with vision OCR, knowledge graphs, and LLM fallback.
