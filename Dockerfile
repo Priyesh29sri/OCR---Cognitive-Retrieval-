@@ -29,11 +29,7 @@ COPY yolov8n.pt .
 # Create data directories
 RUN mkdir -p qdrant_data uploads
 
-# Expose port
-EXPOSE 8000
+# Expose port (7860 for HuggingFace Spaces, 8000 default)
+EXPOSE 7860 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD wget -qO- http://localhost:8000/ || exit 1
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level info"]
