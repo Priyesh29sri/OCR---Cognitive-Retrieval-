@@ -24,7 +24,9 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 
 # Copy application code
 COPY app/ ./app/
-COPY yolov8n.pt .
+
+# Download yolov8n.pt model at build time
+RUN wget -q https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt -O yolov8n.pt
 
 # Create data directories
 RUN mkdir -p qdrant_data uploads
