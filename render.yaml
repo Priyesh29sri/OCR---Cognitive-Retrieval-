@@ -14,10 +14,6 @@ services:
         sync: false
       - key: HUGGING_FACE_HUB_TOKEN
         sync: false
-    disk:
-      name: qdrant-storage
-      mountPath: /app/qdrant_data
-      sizeGB: 1
 
   # Frontend — Next.js
   - type: web
