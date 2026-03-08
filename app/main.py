@@ -349,11 +349,13 @@ async def query_documents(
             document_id=request.document_id
         )
         
-        # Check if we got any context
+        # Check if we got any context — if not, still try to answer or explain
         if not retrieval_result.get("context") or not retrieval_result.get("context").strip():
-            raise HTTPException(
-                status_code=404,
-                detail="No relevant context found. Please upload documents first."
+            return AnswerResponse(
+                answer="I could not find relevant content in the uploaded document for this query. This may happen if: (1) the document is still being indexed in the background — please wait 10-15 seconds and try again, or (2) the document doesn't contain information related to your question.",
+                confidence=0.0,
+                sources=[],
+                metadata={"warning": "No context found", "query": request.query}
             )
         
         # Step 2: Generate answer using Gemini with Together AI fallback

@@ -24,8 +24,17 @@ class VectorRepository:
             distance=models.Distance.COSINE
         )
         
-        # Check if collection exists, if not, create it
-        if not await self.db_client.collection_exists(self.collection_name):
+        # Check if collection exists with correct vector size, recreate if mismatched
+        if await self.db_client.collection_exists(self.collection_name):
+            info = await self.db_client.get_collection(self.collection_name)
+            existing_size = info.config.params.vectors.size
+            if existing_size != size:
+                await self.db_client.delete_collection(self.collection_name)
+                await self.db_client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=vectors_config,
+                )
+        else:
             await self.db_client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=vectors_config,
