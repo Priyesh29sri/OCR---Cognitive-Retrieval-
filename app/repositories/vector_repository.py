@@ -31,6 +31,16 @@ class VectorRepository:
                 vectors_config=vectors_config,
             )
 
+        # Create payload index for document_id (required for Qdrant Cloud filtering)
+        try:
+            await self.db_client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="document_id",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
+        except Exception:
+            pass  # Index already exists, ignore
+
     async def store_chunk(self, embedding_vector: list[float], original_text: str, source_type: str, document_id: str = None) -> None:
         """Stores an embedding vector and its original text into Qdrant."""
         point_id = str(uuid.uuid4())
