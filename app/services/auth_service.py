@@ -63,6 +63,9 @@ class AuthService:
             Encoded JWT token string
         """
         to_encode = data.copy()
+        # jose requires 'sub' to be a string
+        if "sub" in to_encode:
+            to_encode["sub"] = str(to_encode["sub"])
         
         if expires_delta:
             expire = datetime.utcnow() + expires_delta
@@ -86,7 +89,8 @@ class AuthService:
         """
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            user_id: int = payload.get("sub")
+            raw_id = payload.get("sub")
+            user_id: int = int(raw_id) if raw_id is not None else None
             email: str = payload.get("email")
             
             if user_id is None:

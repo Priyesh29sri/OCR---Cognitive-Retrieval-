@@ -1,0 +1,143 @@
+{
+  "evaluation_timestamp": "2026-03-08T19:44:07Z",
+  "system": "ICDI-X",
+  "document": "/Users/priyeshsrivastava/OCR/Untitled document-9.pdf",
+  "doc_id": "19",
+  "upload_time_s": 73.03,
+  "qa_benchmark": {
+    "n_queries": 60,
+    "n_errors": 0,
+    "bleu4": 0.0001,
+    "rouge_l_f1": 0.0288,
+    "rouge_l_precision": 0.0148,
+    "rouge_l_recall": 0.5392,
+    "avg_f1_token": 0.0413,
+    "avg_keyword_recall": 0.5653,
+    "avg_faithfulness": 0.5,
+    "avg_answer_relevancy": 0.0853,
+    "ece": 0.4,
+    "avg_latency_ms": 16944.2,
+    "median_latency_ms": 14802.7,
+    "p95_latency_ms": 30411.1,
+    "p99_latency_ms": 43378.8,
+    "min_latency_ms": 8633.8,
+    "max_latency_ms": 43378.8,
+    "by_category": {
+      "factual": {
+        "avg_f1": 0.041,
+        "avg_kwr": 0.418,
+        "avg_lat": 16497.9,
+        "n": 10
+      },
+      "analytical": {
+        "avg_f1": 0.041,
+        "avg_kwr": 0.573,
+        "avg_lat": 17112.7,
+        "n": 10
+      },
+      "multi_hop": {
+        "avg_f1": 0.059,
+        "avg_kwr": 0.787,
+        "avg_lat": 19203.7,
+        "n": 5
+      },
+      "aggregation": {
+        "avg_f1": 0.033,
+        "avg_kwr": 0.553,
+        "avg_lat": 19862.3,
+        "n": 5
+      },
+      "definitional": {
+        "avg_f1": 0.017,
+        "avg_kwr": 0.4,
+        "avg_lat": 17914.4,
+        "n": 5
+      },
+      "reasoning": {
+        "avg_f1": 0.05,
+        "avg_kwr": 0.647,
+        "avg_lat": 23441.1,
+        "n": 5
+      },
+      "comparative": {
+        "avg_f1": 0.056,
+        "avg_kwr": 0.767,
+        "avg_lat": 12672.6,
+        "n": 5
+      },
+      "critical": {
+        "avg_f1": 0.041,
+        "avg_kwr": 0.633,
+        "avg_lat": 13564.1,
+        "n": 5
+      },
+      "application": {
+        "avg_f1": 0.046,
+        "avg_kwr": 0.567,
+        "avg_lat": 12189.6,
+        "n": 5
+      },
+      "synthesis": {
+        "avg_f1": 0.029,
+        "avg_kwr": 0.447,
+        "avg_lat": 17261.7,
+        "n": 5
+      }
+    }
+  },
+  "feature_tests": {
+    "insights": {
+      "status": "ok",
+      "latency_ms": 4825.6,
+      "n_insights": 5,
+      "n_questions": 5,
+      "n_entities": 14,
+      "chunks_selected": 8,
+      "chunks_analyzed": 8,
+      "compression_ratio": 1.0,
+      "doc_type": "research_paper",
+      "complexity": "advanced"
+    },
+    "study_guide": {
+      "status": "ok",
+      "latency_ms": 5850.9,
+      "title": "Adaptive RAG Document Intelligence",
+      "n_concepts": 5,
+      "study_time_min": 60,
+      "blooms_levels_populated": 6
+    },
+    "contradictions": {
+      "status": "error",
+      "latency_ms": 39.4,
+      "code": 422
+    },
+    "knowledge_graph": {
+      "status": "error",
+      "code": 401
+    },
+    "kg_d3": {
+      "status": "error",
+      "latency_ms": 20.8,
+      "code": 500
+    },
+    "pipeline_summary": {
+      "status": "error",
+      "latency_ms": 2.8,
+      "code": 401
+    },
+    "streaming": {
+      "status": "exception",
+      "error": "Response ended prematurely"
+    },
+    "query_multi": {
+      "status": "error",
+      "latency_ms": 11.7,
+      "code": 422
+    }
+  },
+  "guardrail_tests": {
+    "total_adversarial": 3,
+    "blocked": 1,
+    "block_rate": 0.333
+  }
+}
